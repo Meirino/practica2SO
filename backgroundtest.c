@@ -9,7 +9,13 @@
 #include <string.h>
 #include <signal.h>
 
-int crear_proceso(int r_entrada, int r_salida, int r_err,  tcommand comando);
+typedef struct {
+	pid_t pid;
+	char *nombre;
+	int reciente;
+} tjob;
+
+int crear_proceso(int r_entrada, int r_salida, int r_err, int background, tcommand comando);
 void changePath(char *path);
 void goHome();
 void ctrlC();
@@ -22,6 +28,7 @@ int main(void) {
 	int i,j;
 
 	int status;
+	int background;
 
 	int k;
 	int entrada;
@@ -29,11 +36,12 @@ int main(void) {
 	int error;
 	int pipe1[2];
 
+	//tjob **jobs = malloc();
+
 	signal(2, ctrlC); // Preparación para soportar señales
 
 	printf("msh> ");
 	while (fgets(buf, 1024, stdin)) {
-		if(strcmp(buf, "") == 0) continue;
 
 		line = tokenize(buf);
 		if (line==NULL || line->ncommands == 0) {
@@ -60,6 +68,9 @@ int main(void) {
 		}
 		if (line->background) {
 			printf("comando a ejecutarse en background\n");
+			background = 1;
+		} else {
+			background = 0;
 		}
 		for (i=0; i < line->ncommands; i++) {
 			printf("orden %d (%s):\n", i, line->commands[i].filename);
@@ -81,13 +92,13 @@ int main(void) {
 		} else {
 			for(k = 0; k < line->ncommands - 1; k++) {
 				pipe(pipe1);
-				pid = crear_proceso(entrada, pipe1[1], error, line->commands[k]);
+				pid = crear_proceso(entrada, pipe1[1], error, background, line->commands[k]);
 				close(pipe1[1]);
 				waitpid(pid, &status, WNOHANG);
 				entrada = pipe1[0];
 			}
 			// Para el último comando
-			pid = crear_proceso(entrada, salida, error, line->commands[k]);
+			pid = crear_proceso(entrada, salida, error, background, line->commands[k]);
 			waitpid(-1, &status, WNOHANG);
 		}
 
@@ -96,7 +107,7 @@ int main(void) {
 	return 0;
 }
 
-int crear_proceso(int r_entrada, int r_salida, int r_err, tcommand comando) {
+int crear_proceso(int r_entrada, int r_salida, int r_err, int background, tcommand comando) {
 	int cpid;
 	cpid = fork();
 
@@ -111,6 +122,9 @@ int crear_proceso(int r_entrada, int r_salida, int r_err, tcommand comando) {
 		}
 		if(r_err != 2) {
 			// Hacer algo
+		}
+		if(background != 0) {
+			setpgid(0,0);
 		}
 
 		return execvp(comando.filename, comando.argv);

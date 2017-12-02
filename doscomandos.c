@@ -9,11 +9,13 @@
 #include <string.h>
 #include <signal.h>
 
-int crear_proceso(int r_entrada, int r_salida, int r_err,  tcommand comando);
+// Declaración de funciones
+int crear_proceso(int r_entrada, int r_salida, int r_err, int background,  tcommand comando);
 void changePath(char *path);
 void goHome();
-void ctrlC();
+void signal_redirect();
 
+// PID de los procesos hijos
 int pid;
 
 int main(void) {
@@ -29,7 +31,11 @@ int main(void) {
 	int error;
 	int pipe1[2];
 
-	signal(2, ctrlC); // Preparación para soportar señales
+	int background;
+
+	// Preparación para soportar señales
+	signal(2, signal_redirect);
+	signal(SIGQUIT, signal_redirect);
 
 	printf("msh> ");
 	while (fgets(buf, 1024, stdin)) {
@@ -60,6 +66,9 @@ int main(void) {
 		}
 		if (line->background) {
 			printf("comando a ejecutarse en background\n");
+			background = 1;
+		} else {
+			background = 0;
 		}
 		for (i=0; i < line->ncommands; i++) {
 			printf("orden %d (%s):\n", i, line->commands[i].filename);
@@ -79,16 +88,29 @@ int main(void) {
 				default : printf("Argumentos mal definidos\n");
 			}
 		} else {
-			for(k = 0; k < line->ncommands - 1; k++) {
-				pipe(pipe1);
-				pid = crear_proceso(entrada, pipe1[1], error, line->commands[k]);
-				close(pipe1[1]);
+			if(background == 1) {
+				for(k = 0; k < line->ncommands - 1; k++) {
+					pipe(pipe1);
+					pid = crear_proceso(entrada, pipe1[1], error, background, line->commands[k]);
+					close(pipe1[1]);
+					waitpid(pid, &status, WNOHANG);
+					entrada = pipe1[0];
+				}
+				// Para el último comando
+				pid = crear_proceso(entrada, salida, error, background, line->commands[k]);
+				waitpid(-1, &status, WNOHANG);
+			} else {
+				for(k = 0; k < line->ncommands - 1; k++) {
+					pipe(pipe1);
+					pid = crear_proceso(entrada, pipe1[1], error, background, line->commands[k]);
+					close(pipe1[1]);
+					waitpid(pid, &status, 0);
+					entrada = pipe1[0];
+				}
+				// Para el último comando
+				pid = crear_proceso(entrada, salida, error, background, line->commands[k]);
 				waitpid(pid, &status, 0);
-				entrada = pipe1[0];
 			}
-			// Para el último comando
-			pid = crear_proceso(entrada, salida, error, line->commands[k]);
-			waitpid(pid, &status, 0);
 		}
 
 		printf("msh> ");
@@ -96,7 +118,7 @@ int main(void) {
 	return 0;
 }
 
-int crear_proceso(int r_entrada, int r_salida, int r_err, tcommand comando) {
+int crear_proceso(int r_entrada, int r_salida, int r_err, int background, tcommand comando) {
 	int cpid;
 	cpid = fork();
 
@@ -110,7 +132,11 @@ int crear_proceso(int r_entrada, int r_salida, int r_err, tcommand comando) {
 			close(r_salida);
 		}
 		if(r_err != 2) {
-			// Hacer algo
+			dup2(r_err, 2);
+			close(r_err);
+		}
+		if(background != 0) {
+			setpgid(0,0);
 		}
 
 		return execvp(comando.filename, comando.argv);
@@ -135,7 +161,7 @@ void goHome() {
 	printf("Directorio cambiado a: %s\n", getcwd(buff, (size_t) size));
 }
 
-void ctrlC() {
+void signal_redirect() {
 	if(pid == 0) {
 		/* Hijo - Cierro el proceso */
 		exit(0);
