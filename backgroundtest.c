@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <signal.h>
+#include <errno.h>
 
 typedef struct {
 	pid_t pid;
@@ -21,11 +22,14 @@ void goHome();
 void ctrlC();
 
 int pid;
+extern int errno;
 
 int main(void) {
 	char buf[1024];
 	tline * line;
 	int i,j;
+
+	int errnum;
 
 	int status;
 	int background;
@@ -36,7 +40,9 @@ int main(void) {
 	int error;
 	int pipe1[2];
 
-	//tjob **jobs = malloc();
+	while((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+		printf("El comando %d ha finalizado", pid);
+	}
 
 	signal(2, ctrlC); // Preparación para soportar señales
 
@@ -51,18 +57,30 @@ int main(void) {
 		if (line->redirect_input != NULL) {
 			printf("redirección de entrada: %s\n", line->redirect_input);
 			entrada = open(line->redirect_input, O_RDONLY);
+			if(entrada < 0) {
+				errnum = errno;
+				printf("* %s: Error. %s\n", line->redirect_input, strerror(errnum));
+			}
 		} else {
 			entrada = 0;
 		}
 		if (line->redirect_output != NULL) {
 			printf("redirección de salida: %s\n", line->redirect_output);
 			salida = creat(line->redirect_output, 0644);
+			if(salida < 0) {
+				errnum = errno;
+				printf("* %s: Error. %s\n", line->redirect_output, strerror(errnum));
+			}
 		} else {
 			salida = 1;
 		}
 		if (line->redirect_error != NULL) {
 			printf("redirección de error: %s\n", line->redirect_error);
 			error = creat(line->redirect_error, 0644);
+			if(error < 0) {
+				errnum = errno;
+				printf("* %s: Error. %s\n", line->redirect_error, strerror(errnum));
+			}
 		} else {
 			error = 2;
 		}
@@ -99,7 +117,7 @@ int main(void) {
 			}
 			// Para el último comando
 			pid = crear_proceso(entrada, salida, error, background, line->commands[k]);
-			waitpid(-1, &status, WNOHANG);
+			waitpid(pid, &status, WNOHANG);
 		}
 
 		printf("msh> ");
